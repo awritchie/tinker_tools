@@ -186,8 +186,9 @@ c
 c     Include a header
 c
       write(ifld,185) 'Units KbT/eA','frame',
-     &                'uind','less_excluded','total'
-  185 format('#',a15,/,'#',a8,2x,a16,2x,a16,2x,a16)
+     &                'uind','total','less_perm_excl',
+     &                'less_excl'
+  185 format('#',a15,/,'#',a8,2x,a16,2x,a16,2x,a16,2x,a16)
 c      write(iout,186) 'Units KbT/eA','frame',
 c     &                'uind','less_excluded','total'
 c  186 format('#',a15,/,'#',a8,2x,a16,2x,a16,2x,a16)
@@ -352,16 +353,16 @@ c
 c        Find the field due to every atom
 c
          do i = 1, n
-            call dofield(i, cx, cy, cz, ifield)
+            call dofield(i, cx, cy, cz, ifield, .false.)
             do j = 1, 9
                field(j) = field(j) + ifield(j)
             end do
          end do 
 c
-c        Find the contributions of the excluded atoms
+c        Find the perm contributions of the excluded atoms
 c
          do i = 1, nexatoms
-            call dofield(exi(i), cx, cy, cz, ifield)
+            call dofield(exi(i), cx, cy, cz, ifield, .true.)
             do j = 1, 9
                exfield(j) = exfield(j) + ifield(j)
             end do
@@ -383,9 +384,33 @@ c
 c         write(iout,280) frame,(v1field+v2field)*0.5,pfield-pexfield,
 c     &                   pfield
 c  280    format(' ',i8,2x,es16.6,2x,es16.6,2x,es16.6)
-         write(ifld,290) frame,(v1field+v2field)*0.5,pfield-pexfield,
-     &                   pfield
-  290    format(' ',i8,2x,es16.6,2x,es16.6,2x,es16.6)
+         write(ifld,290,advance='no') frame,(v1field+v2field)*0.5,
+     &                   pfield, pfield-pexfield
+  290    format(' ',i8,2x,es16.6,2x,es16.6,2x,es16.6,2x)
+c
+c        Find the total contributions of the excluded atoms
+c
+         do i = 1, 9
+            exfield(i) = 0.0d0
+         end do
+         do i = 1, nexatoms
+            call dofield(exi(i), cx, cy, cz, ifield, .false.)
+            do j = 1, 9
+               exfield(j) = exfield(j) + ifield(j)
+            end do
+         end do
+c
+c        Project along the bond vector
+c
+         call projectVector(exfield(1:3),bondvector,prexfield(1))
+         call projectVector(exfield(4:6),bondvector,prexfield(2))
+         call projectVector(exfield(7:9),bondvector,prexfield(3))
+         pexfield = prexfield(1) + prexfield(2) + prexfield(3)
+c
+c    Write to screen and file
+c
+         write(ifld,295) pfield-pexfield
+  295    format(es16.6)
 c
 c    attempt to read the next frame
 c
@@ -397,7 +422,7 @@ c
       if (douind) close(unit=iind)
       end
 
-      subroutine dofield(index,cx,cy,cz,field)
+      subroutine dofield(index,cx,cy,cz,field,uperm_only)
       use sizes
       use atoms
       use mpole
@@ -413,6 +438,7 @@ c
       real*8 qq(3)
       real*8 cfac,coulombs,kbt,permitivity_constant
       real*8 field(9)
+      logical uperm_only
 c
 c     To convert the fields from e/Angstrom**2 to KbT/eAngstrom
 c
@@ -461,16 +487,28 @@ c
 c
 c     Dipole field
 c
-      pdotr = (rpole(2,index) + uind(1,index))*xr 
-     &      + (rpole(3,index) + uind(2,index))*yr 
-     &      + (rpole(4,index) + uind(3,index))*zr
-      field(4) = rr5 * pdotr * xr - rr3 * (rpole(2,index)+uind(1,index))
-      field(5) = rr5 * pdotr * yr - rr3 * (rpole(3,index)+uind(2,index))
-      field(6) = rr5 * pdotr * zr - rr3 * (rpole(4,index)+uind(3,index))
+      if (.not. uperm_only) then
+         pdotr = (rpole(2,index) + uind(1,index))*xr
+     &         + (rpole(3,index) + uind(2,index))*yr
+     &         + (rpole(4,index) + uind(3,index))*zr
+         field(4) = rr5 * pdotr * xr - rr3
+     &                  * (rpole(2,index)+uind(1,index))
+         field(5) = rr5 * pdotr * yr - rr3
+     &                  * (rpole(3,index)+uind(2,index))
+         field(6) = rr5 * pdotr * zr - rr3
+     &                  * (rpole(4,index)+uind(3,index))
+       else
+         pdotr = (rpole(2,index))*xr
+     &         + (rpole(3,index))*yr
+     &         + (rpole(4,index))*zr
+         field(4) = rr5 * pdotr * xr - rr3 * (rpole(2,index))
+         field(5) = rr5 * pdotr * yr - rr3 * (rpole(3,index))
+         field(6) = rr5 * pdotr * zr - rr3 * (rpole(4,index))
+       end if
 c
 c     Quadrupole field
 c
-      qq(1) = rpole(5,index)*xr + 
+      qq(1) = rpole(5,index)*xr +
      &        rpole(6,index)*yr +
      &        rpole(7,index)*zr 
       qq(2) = rpole(6,index)*xr + 
